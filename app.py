@@ -46,6 +46,33 @@ def init_db():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            organisation_id INTEGER NOT NULL,
+            nom TEXT NOT NULL,
+            role TEXT,
+            telephone TEXT,
+            courriel TEXT,
+            notes TEXT,
+            FOREIGN KEY (organisation_id) REFERENCES organisations (id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS taches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            organisation_id INTEGER,
+            titre TEXT NOT NULL,
+            responsable TEXT,
+            echeance TEXT,
+            statut TEXT,
+            priorite TEXT,
+            notes TEXT,
+            FOREIGN KEY (organisation_id) REFERENCES organisations (id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -100,6 +127,8 @@ def supprimer_organisation(org_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("DELETE FROM suivis WHERE organisation_id = ?", (org_id,))
+    cur.execute("DELETE FROM contacts WHERE organisation_id = ?", (org_id,))
+    cur.execute("DELETE FROM taches WHERE organisation_id = ?", (org_id,))
     cur.execute("DELETE FROM organisations WHERE id = ?", (org_id,))
     conn.commit()
     conn.close()
@@ -151,32 +180,128 @@ def ajouter_suivi(organisation_id, date_suivi, type_suivi, resume, prochaine_act
     conn.close()
 
 
+def get_contacts_by_organisation(org_id):
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        SELECT
+            id,
+            nom,
+            role,
+            telephone,
+            courriel,
+            notes
+        FROM contacts
+        WHERE organisation_id = ?
+        ORDER BY nom ASC
+    """, conn, params=(org_id,))
+    conn.close()
+    return df
+
+
+def ajouter_contact(organisation_id, nom, role, telephone, courriel, notes):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO contacts (organisation_id, nom, role, telephone, courriel, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (organisation_id, nom, role, telephone, courriel, notes))
+    conn.commit()
+    conn.close()
+
+
+def get_taches():
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        SELECT
+            taches.id,
+            taches.titre,
+            COALESCE(organisations.nom, '-') AS organisation,
+            taches.responsable,
+            taches.echeance,
+            taches.statut,
+            taches.priorite,
+            taches.notes
+        FROM taches
+        LEFT JOIN organisations ON taches.organisation_id = organisations.id
+        ORDER BY
+            CASE
+                WHEN taches.statut = 'À faire' THEN 1
+                WHEN taches.statut = 'En cours' THEN 2
+                WHEN taches.statut = 'Terminée' THEN 3
+                ELSE 4
+            END,
+            taches.echeance ASC,
+            taches.id DESC
+    """, conn)
+    conn.close()
+    return df
+
+
+def get_taches_by_organisation(org_id):
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        SELECT
+            id,
+            titre,
+            responsable,
+            echeance,
+            statut,
+            priorite,
+            notes
+        FROM taches
+        WHERE organisation_id = ?
+        ORDER BY echeance ASC, id DESC
+    """, conn, params=(org_id,))
+    conn.close()
+    return df
+
+
+def ajouter_tache(organisation_id, titre, responsable, echeance, statut, priorite, notes):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO taches (organisation_id, titre, responsable, echeance, statut, priorite, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (organisation_id, titre, responsable, echeance, statut, priorite, notes))
+    conn.commit()
+    conn.close()
+
+
 init_db()
 
 if "org_selectionnee" not in st.session_state:
     st.session_state.org_selectionnee = None
 
 st.title("Espace EC CRM")
-st.caption("Base interne simple pour la gestion des organismes et des suivis.")
+st.caption("Base interne simple pour la gestion des organismes, suivis, contacts et tâches.")
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["Tableau de bord", "Organismes", "Fiche organisme", "Suivis"]
+    ["Tableau de bord", "Organismes", "Fiche organisme", "Suivis", "Tâches"]
 )
 
 if menu == "Tableau de bord":
     orgs = get_organisations()
     suivis = get_suivis()
+    taches = get_taches()
 
-    col1, col2 = st.columns(2)
-    col1.metric("Nombre d'organismes", len(orgs))
-    col2.metric("Nombre de suivis", len(suivis))
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Organismes", len(orgs))
+    col2.metric("Suivis", len(suivis))
+    col3.metric("Tâches", len(taches))
 
     st.subheader("Derniers suivis")
     if suivis.empty:
         st.info("Aucun suivi enregistré pour le moment.")
     else:
-        st.dataframe(suivis.head(10), use_container_width=True)
+        st.dataframe(suivis.head(8), use_container_width=True)
+
+    st.subheader("Tâches en cours")
+    if taches.empty:
+        st.info("Aucune tâche enregistrée.")
+    else:
+        taches_actives = taches[taches["statut"].isin(["À faire", "En cours"])]
+        st.dataframe(taches_actives.head(8), use_container_width=True)
 
 elif menu == "Organismes":
     st.subheader("Ajouter un organisme")
@@ -244,7 +369,6 @@ elif menu == "Organismes":
         if st.button("Ouvrir la fiche"):
             if selection:
                 st.session_state.org_selectionnee = options[selection]
-                st.session_state.menu_force = "Fiche organisme"
                 st.rerun()
 
 elif menu == "Fiche organisme":
@@ -343,6 +467,41 @@ elif menu == "Fiche organisme":
                         st.success("Organisme modifié avec succès.")
                         st.rerun()
 
+            st.markdown("### Contacts liés")
+            contacts_org = get_contacts_by_organisation(org_id)
+
+            with st.form("form_contact", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    contact_nom = st.text_input("Nom du contact *")
+                    contact_role = st.text_input("Rôle / fonction")
+                    contact_telephone = st.text_input("Téléphone")
+                with c2:
+                    contact_courriel = st.text_input("Courriel")
+                    contact_notes = st.text_area("Notes contact")
+
+                submit_contact = st.form_submit_button("Ajouter le contact")
+
+                if submit_contact:
+                    if not contact_nom.strip():
+                        st.error("Le nom du contact est obligatoire.")
+                    else:
+                        ajouter_contact(
+                            org_id,
+                            contact_nom.strip(),
+                            contact_role.strip(),
+                            contact_telephone.strip(),
+                            contact_courriel.strip(),
+                            contact_notes.strip()
+                        )
+                        st.success("Contact ajouté avec succès.")
+                        st.rerun()
+
+            if contacts_org.empty:
+                st.info("Aucun contact pour cet organisme.")
+            else:
+                st.dataframe(contacts_org, use_container_width=True)
+
             st.markdown("### Suivis liés")
             suivis_org = get_suivis_by_organisation(org_id)
 
@@ -351,8 +510,45 @@ elif menu == "Fiche organisme":
             else:
                 st.dataframe(suivis_org, use_container_width=True)
 
+            st.markdown("### Tâches liées")
+            taches_org = get_taches_by_organisation(org_id)
+
+            with st.form("form_tache_fiche", clear_on_submit=True):
+                t1, t2 = st.columns(2)
+                with t1:
+                    tache_titre = st.text_input("Titre de la tâche *")
+                    tache_responsable = st.text_input("Responsable")
+                    tache_echeance = st.date_input("Échéance", value=date.today(), key="echeance_fiche")
+                with t2:
+                    tache_statut = st.selectbox("Statut", ["À faire", "En cours", "Terminée"], key="statut_fiche")
+                    tache_priorite = st.selectbox("Priorité", ["Basse", "Moyenne", "Haute"], key="priorite_fiche")
+                    tache_notes = st.text_area("Notes de la tâche", key="notes_fiche")
+
+                submit_tache = st.form_submit_button("Ajouter la tâche")
+
+                if submit_tache:
+                    if not tache_titre.strip():
+                        st.error("Le titre de la tâche est obligatoire.")
+                    else:
+                        ajouter_tache(
+                            org_id,
+                            tache_titre.strip(),
+                            tache_responsable.strip(),
+                            str(tache_echeance),
+                            tache_statut,
+                            tache_priorite,
+                            tache_notes.strip()
+                        )
+                        st.success("Tâche ajoutée avec succès.")
+                        st.rerun()
+
+            if taches_org.empty:
+                st.info("Aucune tâche liée à cet organisme.")
+            else:
+                st.dataframe(taches_org, use_container_width=True)
+
             st.markdown("### Suppression")
-            confirmation = st.checkbox("Je confirme la suppression de cet organisme et de ses suivis liés.")
+            confirmation = st.checkbox("Je confirme la suppression de cet organisme et de ses éléments liés.")
             if st.button("Supprimer cet organisme", type="secondary"):
                 if confirmation:
                     supprimer_organisation(org_id)
@@ -376,15 +572,9 @@ elif menu == "Suivis":
         }
 
         with st.form("form_suivi", clear_on_submit=True):
-            organisation_label = st.selectbox(
-                "Organisme",
-                list(options_orgs.keys())
-            )
+            organisation_label = st.selectbox("Organisme", list(options_orgs.keys()))
             date_suivi = st.date_input("Date du suivi", value=date.today())
-            type_suivi = st.selectbox(
-                "Type de suivi",
-                ["Téléphone", "Courriel", "Rencontre", "Visite", "Autre"]
-            )
+            type_suivi = st.selectbox("Type de suivi", ["Téléphone", "Courriel", "Rencontre", "Visite", "Autre"])
             resume = st.text_area("Résumé du suivi *")
             prochaine_action = st.text_area("Prochaine action")
 
@@ -411,3 +601,62 @@ elif menu == "Suivis":
         st.info("Aucun suivi enregistré.")
     else:
         st.dataframe(suivis, use_container_width=True)
+
+elif menu == "Tâches":
+    st.subheader("Ajouter une tâche")
+
+    orgs = get_organisations()
+    options_orgs = {"Aucun organisme lié": None}
+
+    if not orgs.empty:
+        for _, row in orgs.iterrows():
+            label = f"{row['nom']} ({row['ville']})" if row['ville'] else row['nom']
+            options_orgs[label] = row["id"]
+
+    with st.form("form_tache_generale", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            titre = st.text_input("Titre de la tâche *")
+            org_label = st.selectbox("Organisme lié", list(options_orgs.keys()))
+            responsable = st.text_input("Responsable")
+            echeance = st.date_input("Échéance", value=date.today(), key="echeance_generale")
+
+        with col2:
+            statut = st.selectbox("Statut", ["À faire", "En cours", "Terminée"], key="statut_general")
+            priorite = st.selectbox("Priorité", ["Basse", "Moyenne", "Haute"], key="priorite_generale")
+            notes = st.text_area("Notes")
+
+        submit_tache_generale = st.form_submit_button("Enregistrer la tâche")
+
+        if submit_tache_generale:
+            if not titre.strip():
+                st.error("Le titre de la tâche est obligatoire.")
+            else:
+                ajouter_tache(
+                    options_orgs[org_label],
+                    titre.strip(),
+                    responsable.strip(),
+                    str(echeance),
+                    statut,
+                    priorite,
+                    notes.strip()
+                )
+                st.success("Tâche ajoutée avec succès.")
+                st.rerun()
+
+    st.subheader("Liste des tâches")
+    taches = get_taches()
+
+    if taches.empty:
+        st.info("Aucune tâche enregistrée.")
+    else:
+        filtre_statut = st.selectbox(
+            "Filtrer par statut",
+            ["Toutes", "À faire", "En cours", "Terminée"]
+        )
+
+        if filtre_statut != "Toutes":
+            taches = taches[taches["statut"] == filtre_statut]
+
+        st.dataframe(taches, use_container_width=True)
