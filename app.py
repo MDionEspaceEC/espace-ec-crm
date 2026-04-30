@@ -198,6 +198,19 @@ def get_contacts_by_organisation(org_id):
     return df
 
 
+def get_contact_by_id(contact_id):
+    conn = get_connection()
+    df = pd.read_sql_query(
+        "SELECT * FROM contacts WHERE id = ?",
+        conn,
+        params=(contact_id,)
+    )
+    conn.close()
+    if df.empty:
+        return None
+    return df.iloc[0]
+
+
 def ajouter_contact(organisation_id, nom, role, telephone, courriel, notes):
     conn = get_connection()
     cur = conn.cursor()
@@ -205,6 +218,26 @@ def ajouter_contact(organisation_id, nom, role, telephone, courriel, notes):
         INSERT INTO contacts (organisation_id, nom, role, telephone, courriel, notes)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (organisation_id, nom, role, telephone, courriel, notes))
+    conn.commit()
+    conn.close()
+
+
+def modifier_contact(contact_id, nom, role, telephone, courriel, notes):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE contacts
+        SET nom = ?, role = ?, telephone = ?, courriel = ?, notes = ?
+        WHERE id = ?
+    """, (nom, role, telephone, courriel, notes, contact_id))
+    conn.commit()
+    conn.close()
+
+
+def supprimer_contact(contact_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
     conn.commit()
     conn.close()
 
@@ -256,6 +289,19 @@ def get_taches_by_organisation(org_id):
     return df
 
 
+def get_tache_by_id(tache_id):
+    conn = get_connection()
+    df = pd.read_sql_query(
+        "SELECT * FROM taches WHERE id = ?",
+        conn,
+        params=(tache_id,)
+    )
+    conn.close()
+    if df.empty:
+        return None
+    return df.iloc[0]
+
+
 def ajouter_tache(organisation_id, titre, responsable, echeance, statut, priorite, notes):
     conn = get_connection()
     cur = conn.cursor()
@@ -263,6 +309,26 @@ def ajouter_tache(organisation_id, titre, responsable, echeance, statut, priorit
         INSERT INTO taches (organisation_id, titre, responsable, echeance, statut, priorite, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (organisation_id, titre, responsable, echeance, statut, priorite, notes))
+    conn.commit()
+    conn.close()
+
+
+def modifier_tache(tache_id, organisation_id, titre, responsable, echeance, statut, priorite, notes):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE taches
+        SET organisation_id = ?, titre = ?, responsable = ?, echeance = ?, statut = ?, priorite = ?, notes = ?
+        WHERE id = ?
+    """, (organisation_id, titre, responsable, echeance, statut, priorite, notes, tache_id))
+    conn.commit()
+    conn.close()
+
+
+def supprimer_tache(tache_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM taches WHERE id = ?", (tache_id,))
     conn.commit()
     conn.close()
 
@@ -502,6 +568,62 @@ elif menu == "Fiche organisme":
             else:
                 st.dataframe(contacts_org, use_container_width=True)
 
+                contacts_options = {
+                    f"{row['nom']} (ID {row['id']})": row["id"]
+                    for _, row in contacts_org.iterrows()
+                }
+
+                contact_selection = st.selectbox(
+                    "Choisir un contact à modifier ou supprimer",
+                    list(contacts_options.keys()),
+                    key="contact_selection"
+                )
+
+                contact_id = contacts_options[contact_selection]
+                contact = get_contact_by_id(contact_id)
+
+                if contact is not None:
+                    with st.form("form_modifier_contact"):
+                        mc1, mc2 = st.columns(2)
+
+                        with mc1:
+                            nom_c_mod = st.text_input("Nom du contact *", value=contact["nom"])
+                            role_c_mod = st.text_input("Rôle / fonction", value=contact["role"] if contact["role"] else "")
+                            tel_c_mod = st.text_input("Téléphone", value=contact["telephone"] if contact["telephone"] else "")
+
+                        with mc2:
+                            courriel_c_mod = st.text_input("Courriel", value=contact["courriel"] if contact["courriel"] else "")
+                            notes_c_mod = st.text_area("Notes", value=contact["notes"] if contact["notes"] else "")
+
+                        submit_mod_contact = st.form_submit_button("Enregistrer les modifications du contact")
+
+                        if submit_mod_contact:
+                            if not nom_c_mod.strip():
+                                st.error("Le nom du contact est obligatoire.")
+                            else:
+                                modifier_contact(
+                                    contact_id,
+                                    nom_c_mod.strip(),
+                                    role_c_mod.strip(),
+                                    tel_c_mod.strip(),
+                                    courriel_c_mod.strip(),
+                                    notes_c_mod.strip()
+                                )
+                                st.success("Contact modifié avec succès.")
+                                st.rerun()
+
+                    confirm_delete_contact = st.checkbox(
+                        "Je confirme la suppression de ce contact.",
+                        key=f"delete_contact_{contact_id}"
+                    )
+                    if st.button("Supprimer ce contact", key=f"btn_delete_contact_{contact_id}"):
+                        if confirm_delete_contact:
+                            supprimer_contact(contact_id)
+                            st.success("Contact supprimé avec succès.")
+                            st.rerun()
+                        else:
+                            st.warning("Tu dois confirmer la suppression du contact.")
+
             st.markdown("### Suivis liés")
             suivis_org = get_suivis_by_organisation(org_id)
 
@@ -546,6 +668,79 @@ elif menu == "Fiche organisme":
                 st.info("Aucune tâche liée à cet organisme.")
             else:
                 st.dataframe(taches_org, use_container_width=True)
+
+                taches_options = {
+                    f"{row['titre']} (ID {row['id']})": row["id"]
+                    for _, row in taches_org.iterrows()
+                }
+
+                tache_selection = st.selectbox(
+                    "Choisir une tâche à modifier ou supprimer",
+                    list(taches_options.keys()),
+                    key="tache_selection_fiche"
+                )
+
+                tache_id = taches_options[tache_selection]
+                tache = get_tache_by_id(tache_id)
+
+                if tache is not None:
+                    with st.form("form_modifier_tache_fiche"):
+                        mt1, mt2 = st.columns(2)
+
+                        with mt1:
+                            titre_t_mod = st.text_input("Titre de la tâche *", value=tache["titre"])
+                            responsable_t_mod = st.text_input("Responsable", value=tache["responsable"] if tache["responsable"] else "")
+                            echeance_value = pd.to_datetime(tache["echeance"]).date() if tache["echeance"] else date.today()
+                            echeance_t_mod = st.date_input("Échéance", value=echeance_value, key=f"edit_echeance_{tache_id}")
+
+                        with mt2:
+                            statuts = ["À faire", "En cours", "Terminée"]
+                            priorites = ["Basse", "Moyenne", "Haute"]
+
+                            statut_t_mod = st.selectbox(
+                                "Statut",
+                                statuts,
+                                index=statuts.index(tache["statut"]) if tache["statut"] in statuts else 0,
+                                key=f"edit_statut_{tache_id}"
+                            )
+                            priorite_t_mod = st.selectbox(
+                                "Priorité",
+                                priorites,
+                                index=priorites.index(tache["priorite"]) if tache["priorite"] in priorites else 1,
+                                key=f"edit_priorite_{tache_id}"
+                            )
+                            notes_t_mod = st.text_area("Notes", value=tache["notes"] if tache["notes"] else "", key=f"edit_notes_{tache_id}")
+
+                        submit_mod_tache = st.form_submit_button("Enregistrer les modifications de la tâche")
+
+                        if submit_mod_tache:
+                            if not titre_t_mod.strip():
+                                st.error("Le titre de la tâche est obligatoire.")
+                            else:
+                                modifier_tache(
+                                    tache_id,
+                                    org_id,
+                                    titre_t_mod.strip(),
+                                    responsable_t_mod.strip(),
+                                    str(echeance_t_mod),
+                                    statut_t_mod,
+                                    priorite_t_mod,
+                                    notes_t_mod.strip()
+                                )
+                                st.success("Tâche modifiée avec succès.")
+                                st.rerun()
+
+                    confirm_delete_tache = st.checkbox(
+                        "Je confirme la suppression de cette tâche.",
+                        key=f"delete_tache_{tache_id}"
+                    )
+                    if st.button("Supprimer cette tâche", key=f"btn_delete_tache_{tache_id}"):
+                        if confirm_delete_tache:
+                            supprimer_tache(tache_id)
+                            st.success("Tâche supprimée avec succès.")
+                            st.rerun()
+                        else:
+                            st.warning("Tu dois confirmer la suppression de la tâche.")
 
             st.markdown("### Suppression")
             confirmation = st.checkbox("Je confirme la suppression de cet organisme et de ses éléments liés.")
@@ -660,3 +855,93 @@ elif menu == "Tâches":
             taches = taches[taches["statut"] == filtre_statut]
 
         st.dataframe(taches, use_container_width=True)
+
+        taches_options_global = {
+            f"{row['titre']} (ID {row['id']})": row["id"]
+            for _, row in taches.iterrows()
+        }
+
+        tache_selection_global = st.selectbox(
+            "Choisir une tâche à modifier ou supprimer",
+            list(taches_options_global.keys()),
+            key="tache_selection_global"
+        )
+
+        tache_id_global = taches_options_global[tache_selection_global]
+        tache_global = get_tache_by_id(tache_id_global)
+
+        if tache_global is not None:
+            orgs_for_edit = get_organisations()
+            org_options_edit = {"Aucun organisme lié": None}
+            for _, row in orgs_for_edit.iterrows():
+                org_options_edit[f"{row['nom']} (ID {row['id']})"] = row["id"]
+
+            org_labels_edit = list(org_options_edit.keys())
+            current_org_label = "Aucun organisme lié"
+            for label, value in org_options_edit.items():
+                if value == tache_global["organisation_id"]:
+                    current_org_label = label
+                    break
+
+            with st.form("form_modifier_tache_global"):
+                gt1, gt2 = st.columns(2)
+
+                with gt1:
+                    titre_g_mod = st.text_input("Titre de la tâche *", value=tache_global["titre"])
+                    org_g_mod = st.selectbox(
+                        "Organisme lié",
+                        org_labels_edit,
+                        index=org_labels_edit.index(current_org_label)
+                    )
+                    responsable_g_mod = st.text_input("Responsable", value=tache_global["responsable"] if tache_global["responsable"] else "")
+                    echeance_g_value = pd.to_datetime(tache_global["echeance"]).date() if tache_global["echeance"] else date.today()
+                    echeance_g_mod = st.date_input("Échéance", value=echeance_g_value, key=f"global_echeance_{tache_id_global}")
+
+                with gt2:
+                    statuts = ["À faire", "En cours", "Terminée"]
+                    priorites = ["Basse", "Moyenne", "Haute"]
+
+                    statut_g_mod = st.selectbox(
+                        "Statut",
+                        statuts,
+                        index=statuts.index(tache_global["statut"]) if tache_global["statut"] in statuts else 0,
+                        key=f"global_statut_{tache_id_global}"
+                    )
+                    priorite_g_mod = st.selectbox(
+                        "Priorité",
+                        priorites,
+                        index=priorites.index(tache_global["priorite"]) if tache_global["priorite"] in priorites else 1,
+                        key=f"global_priorite_{tache_id_global}"
+                    )
+                    notes_g_mod = st.text_area("Notes", value=tache_global["notes"] if tache_global["notes"] else "", key=f"global_notes_{tache_id_global}")
+
+                submit_mod_tache_global = st.form_submit_button("Enregistrer les modifications de la tâche")
+
+                if submit_mod_tache_global:
+                    if not titre_g_mod.strip():
+                        st.error("Le titre de la tâche est obligatoire.")
+                    else:
+                        modifier_tache(
+                            tache_id_global,
+                            org_options_edit[org_g_mod],
+                            titre_g_mod.strip(),
+                            responsable_g_mod.strip(),
+                            str(echeance_g_mod),
+                            statut_g_mod,
+                            priorite_g_mod,
+                            notes_g_mod.strip()
+                        )
+                        st.success("Tâche modifiée avec succès.")
+                        st.rerun()
+
+            confirm_delete_tache_global = st.checkbox(
+                "Je confirme la suppression de cette tâche.",
+                key=f"delete_tache_global_{tache_id_global}"
+            )
+            if st.button("Supprimer cette tâche", key=f"btn_delete_tache_global_{tache_id_global}"):
+                if confirm_delete_tache_global:
+                    supprimer_tache(tache_id_global)
+                    st.success("Tâche supprimée avec succès.")
+                    st.rerun()
+                else:
+                    st.warning("Tu dois confirmer la suppression de la tâche.")
