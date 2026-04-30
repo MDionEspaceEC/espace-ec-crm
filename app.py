@@ -12,6 +12,14 @@ st.set_page_config(
 
 DB_NAME = "espace_ec_crm.db"
 
+CATEGORIES_TACHES = [
+    "01 - Valoriser l'Économie Sociale",
+    "02 - Renforcer l'économie Sociale",
+    "03 - Soutenir l'émergence de l'économie Sociale",
+    "04 - Déployer un écosystème de soutien fort",
+    "05 - Organisation forte (Interne)"
+]
+
 
 def get_connection():
     return sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -83,6 +91,7 @@ def init_db():
             organisation_id INTEGER,
             employe_id INTEGER,
             titre TEXT NOT NULL,
+            categorie TEXT,
             responsable TEXT,
             echeance TEXT,
             statut TEXT,
@@ -92,6 +101,11 @@ def init_db():
             FOREIGN KEY (employe_id) REFERENCES employes (id)
         )
     """)
+
+    cur.execute("PRAGMA table_info(taches)")
+    colonnes_taches = [row[1] for row in cur.fetchall()]
+    if "categorie" not in colonnes_taches:
+        cur.execute("ALTER TABLE taches ADD COLUMN categorie TEXT")
 
     conn.commit()
     conn.close()
@@ -270,6 +284,7 @@ def get_taches():
         SELECT
             taches.id,
             taches.titre,
+            COALESCE(taches.categorie, '-') AS categorie,
             COALESCE(organisations.nom, '-') AS organisation,
             COALESCE(employes.nom, taches.responsable, '-') AS employe_assigne,
             taches.responsable,
@@ -300,6 +315,7 @@ def get_taches_by_organisation(org_id):
         SELECT
             id,
             titre,
+            categorie,
             responsable,
             echeance,
             statut,
@@ -320,6 +336,7 @@ def get_taches_by_employe(employe_id):
         SELECT
             taches.id,
             taches.titre,
+            COALESCE(taches.categorie, '-') AS categorie,
             COALESCE(organisations.nom, '-') AS organisation,
             taches.echeance,
             taches.statut,
@@ -348,25 +365,25 @@ def get_tache_by_id(tache_id):
     return None if df.empty else df.iloc[0]
 
 
-def ajouter_tache(organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes):
+def ajouter_tache(organisation_id, employe_id, titre, categorie, responsable, echeance, statut, priorite, notes):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO taches (organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes))
+        INSERT INTO taches (organisation_id, employe_id, titre, categorie, responsable, echeance, statut, priorite, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (organisation_id, employe_id, titre, categorie, responsable, echeance, statut, priorite, notes))
     conn.commit()
     conn.close()
 
 
-def modifier_tache(tache_id, organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes):
+def modifier_tache(tache_id, organisation_id, employe_id, titre, categorie, responsable, echeance, statut, priorite, notes):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         UPDATE taches
-        SET organisation_id = ?, employe_id = ?, titre = ?, responsable = ?, echeance = ?, statut = ?, priorite = ?, notes = ?
+        SET organisation_id = ?, employe_id = ?, titre = ?, categorie = ?, responsable = ?, echeance = ?, statut = ?, priorite = ?, notes = ?
         WHERE id = ?
-    """, (organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes, tache_id))
+    """, (organisation_id, employe_id, titre, categorie, responsable, echeance, statut, priorite, notes, tache_id))
     conn.commit()
     conn.close()
 
@@ -719,6 +736,7 @@ elif menu == "Fiche organisme":
                 t1, t2 = st.columns(2)
                 with t1:
                     tache_titre = st.text_input("Titre de la tâche *")
+                    tache_categorie = st.selectbox("Catégorie stratégique", CATEGORIES_TACHES, key="categorie_fiche")
                     employe_label = st.selectbox("Employé assigné", list(employe_options.keys()), key="employe_tache_fiche")
                     tache_echeance = st.date_input("Échéance", value=date.today(), key="echeance_fiche")
                 with t2:
@@ -742,6 +760,7 @@ elif menu == "Fiche organisme":
                             org_id,
                             employe_id,
                             tache_titre.strip(),
+                            tache_categorie,
                             responsable_nom,
                             str(tache_echeance),
                             tache_statut,
@@ -812,6 +831,7 @@ elif menu == "Tâches":
 
         with col1:
             titre = st.text_input("Titre de la tâche *")
+            categorie = st.selectbox("Catégorie stratégique", CATEGORIES_TACHES)
             org_label = st.selectbox("Organisme lié", list(options_orgs.keys()))
             employe_label = st.selectbox("Employé assigné", list(options_employes.keys()))
             echeance = st.date_input("Échéance", value=date.today(), key="echeance_generale")
@@ -837,6 +857,7 @@ elif menu == "Tâches":
                     options_orgs[org_label],
                     employe_id,
                     titre.strip(),
+                    categorie,
                     responsable_nom,
                     str(echeance),
                     statut,
@@ -851,7 +872,7 @@ elif menu == "Tâches":
     if taches.empty:
         st.info("Aucune tâche enregistrée.")
     else:
-        f1, f2, f3 = st.columns(3)
+        f1, f2, f3, f4 = st.columns(4)
 
         with f1:
             filtre_statut = st.selectbox("Filtrer par statut", ["Toutes", "À faire", "En cours", "Terminée"])
@@ -865,6 +886,9 @@ elif menu == "Tâches":
         with f3:
             filtre_priorite = st.selectbox("Filtrer par priorité", ["Toutes", "Basse", "Moyenne", "Haute"])
 
+        with f4:
+            filtre_categorie = st.selectbox("Filtrer par catégorie", ["Toutes"] + CATEGORIES_TACHES)
+
         taches_filtrees = taches.copy()
 
         if filtre_statut != "Toutes":
@@ -875,6 +899,9 @@ elif menu == "Tâches":
 
         if filtre_priorite != "Toutes":
             taches_filtrees = taches_filtrees[taches_filtrees["priorite"] == filtre_priorite]
+
+        if filtre_categorie != "Toutes":
+            taches_filtrees = taches_filtrees[taches_filtrees["categorie"] == filtre_categorie]
 
         tab1, tab2 = st.tabs(["Vue tableau", "Vue par employé"])
 
