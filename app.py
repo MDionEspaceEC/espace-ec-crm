@@ -33,11 +33,11 @@ def init_db():
             notes TEXT
         )
     """)
+
     cur.execute("PRAGMA table_info(organisations)")
     colonnes_org = [row[1] for row in cur.fetchall()]
     if "employe_id_attitre" not in colonnes_org:
         cur.execute("ALTER TABLE organisations ADD COLUMN employe_id_attitre INTEGER")
-
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS employes (
@@ -189,6 +189,11 @@ def supprimer_employe(employe_id):
         UPDATE taches
         SET employe_id = NULL, responsable = ''
         WHERE employe_id = ?
+    """, (employe_id,))
+    cur.execute("""
+        UPDATE organisations
+        SET employe_id_attitre = NULL
+        WHERE employe_id_attitre = ?
     """, (employe_id,))
     cur.execute("DELETE FROM employes WHERE id = ?", (employe_id,))
     conn.commit()
@@ -426,20 +431,16 @@ elif menu == "Organismes":
         with col2:
             courriel = st.text_input("Courriel")
             statut = st.selectbox("Statut", ["Actif", "En démarrage", "À relancer", "Inactif"])
+            employe_attitre_label = st.selectbox("Employé attitré à l'organisme", list(options_employes.keys()))
             notes = st.text_area("Notes")
 
         submit_org = st.form_submit_button("Enregistrer l'organisme")
-
-            employe_attitre_label = st.selectbox(
-                "Employé attitré à l'organisme",
-                list(options_employes.keys())
-            )
 
         if submit_org:
             if not nom.strip():
                 st.error("Le nom de l'organisme est obligatoire.")
             else:
-                                ajouter_organisation(
+                ajouter_organisation(
                     nom.strip(),
                     type_org,
                     ville.strip(),
@@ -449,7 +450,8 @@ elif menu == "Organismes":
                     notes.strip(),
                     options_employes[employe_attitre_label]
                 )
-
+                st.success("Organisme ajouté avec succès.")
+                st.rerun()
 
     st.subheader("Liste des organismes")
     orgs = get_organisations()
@@ -595,10 +597,81 @@ elif menu == "Fiche organisme":
         if org is None:
             st.error("Organisme introuvable.")
         else:
+            employe_attitre_nom = "-"
+            if org["employe_id_attitre"]:
+                emp_attitre = get_employe_by_id(org["employe_id_attitre"])
+                if emp_attitre is not None:
+                    employe_attitre_nom = emp_attitre["nom"]
+
             st.subheader(f"Fiche de : {org['nom']}")
             st.write(f"**Ville** : {org['ville'] if org['ville'] else '-'}")
             st.write(f"**Statut** : {org['statut'] if org['statut'] else '-'}")
+            st.write(f"**Employé attitré** : {employe_attitre_nom}")
             st.write(f"**Notes** : {org['notes'] if org['notes'] else '-'}")
+
+            st.markdown("### Modifier l'organisme")
+
+            types_disponibles = ["", "OBNL", "Coopérative", "Entreprise d'économie sociale", "Institution", "Autre"]
+            statuts_disponibles = ["Actif", "En démarrage", "À relancer", "Inactif"]
+
+            employes = get_employes()
+            options_employes = {"Aucun employé attitré": None}
+            for _, row in employes.iterrows():
+                options_employes[f"{row['nom']} (ID {row['id']})"] = row["id"]
+
+            labels_employes = list(options_employes.keys())
+            label_attitre_actuel = "Aucun employé attitré"
+            for label, value in options_employes.items():
+                if value == org["employe_id_attitre"]:
+                    label_attitre_actuel = label
+                    break
+
+            with st.form("form_modifier_organisation"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    nom_mod = st.text_input("Nom de l'organisme *", value=org["nom"])
+                    type_mod = st.selectbox(
+                        "Type d'organisme",
+                        types_disponibles,
+                        index=types_disponibles.index(org["type_org"]) if org["type_org"] in types_disponibles else 0
+                    )
+                    ville_mod = st.text_input("Ville", value=org["ville"] if org["ville"] else "")
+                    telephone_mod = st.text_input("Téléphone", value=org["telephone"] if org["telephone"] else "")
+
+                with col2:
+                    courriel_mod = st.text_input("Courriel", value=org["courriel"] if org["courriel"] else "")
+                    statut_mod = st.selectbox(
+                        "Statut",
+                        statuts_disponibles,
+                        index=statuts_disponibles.index(org["statut"]) if org["statut"] in statuts_disponibles else 0
+                    )
+                    employe_attitre_mod = st.selectbox(
+                        "Employé attitré à l'organisme",
+                        labels_employes,
+                        index=labels_employes.index(label_attitre_actuel)
+                    )
+                    notes_mod = st.text_area("Notes", value=org["notes"] if org["notes"] else "")
+
+                submit_mod = st.form_submit_button("Enregistrer les modifications")
+
+                if submit_mod:
+                    if not nom_mod.strip():
+                        st.error("Le nom de l'organisme est obligatoire.")
+                    else:
+                        modifier_organisation(
+                            org_id,
+                            nom_mod.strip(),
+                            type_mod,
+                            ville_mod.strip(),
+                            telephone_mod.strip(),
+                            courriel_mod.strip(),
+                            statut_mod,
+                            notes_mod.strip(),
+                            options_employes[employe_attitre_mod]
+                        )
+                        st.success("Organisme modifié avec succès.")
+                        st.rerun()
 
             st.markdown("### Contacts liés")
             contacts_org = get_contacts_by_organisation(org_id)
