@@ -798,7 +798,7 @@ elif menu == "Suivis":
         st.dataframe(suivis, use_container_width=True)
 
 elif menu == "Tâches":
-    st.subheader("Ajouter une tâche")
+    st.subheader("Planification des tâches")
 
     orgs = get_organisations()
     options_orgs = {"Aucun organisme lié": None}
@@ -840,108 +840,259 @@ elif menu == "Tâches":
                 st.success("Tâche ajoutée avec succès.")
                 st.rerun()
 
-    st.subheader("Liste des tâches")
+    st.markdown("### Vues de planification")
+
     taches = get_taches()
 
     if taches.empty:
         st.info("Aucune tâche enregistrée.")
     else:
-        filtre_statut = st.selectbox(
-            "Filtrer par statut",
-            ["Toutes", "À faire", "En cours", "Terminée"]
-        )
+        f1, f2, f3 = st.columns(3)
+
+        with f1:
+            filtre_statut = st.selectbox(
+                "Filtrer par statut",
+                ["Toutes", "À faire", "En cours", "Terminée"],
+                key="filtre_statut_planif"
+            )
+
+        with f2:
+            responsables = ["Tous"] + sorted([r for r in taches["responsable"].dropna().unique() if str(r).strip() != ""])
+            filtre_responsable = st.selectbox(
+                "Filtrer par responsable",
+                responsables,
+                key="filtre_responsable_planif"
+            )
+
+        with f3:
+            filtre_priorite = st.selectbox(
+                "Filtrer par priorité",
+                ["Toutes", "Basse", "Moyenne", "Haute"],
+                key="filtre_priorite_planif"
+            )
+
+        taches_filtrees = taches.copy()
 
         if filtre_statut != "Toutes":
-            taches = taches[taches["statut"] == filtre_statut]
+            taches_filtrees = taches_filtrees[taches_filtrees["statut"] == filtre_statut]
 
-        st.dataframe(taches, use_container_width=True)
+        if filtre_responsable != "Tous":
+            taches_filtrees = taches_filtrees[taches_filtrees["responsable"] == filtre_responsable]
 
-        taches_options_global = {
-            f"{row['titre']} (ID {row['id']})": row["id"]
-            for _, row in taches.iterrows()
-        }
+        if filtre_priorite != "Toutes":
+            taches_filtrees = taches_filtrees[taches_filtrees["priorite"] == filtre_priorite]
 
-        tache_selection_global = st.selectbox(
-            "Choisir une tâche à modifier ou supprimer",
-            list(taches_options_global.keys()),
-            key="tache_selection_global"
-        )
+        tab1, tab2 = st.tabs(["Vue tableau", "Vue kanban"])
 
-        tache_id_global = taches_options_global[tache_selection_global]
-        tache_global = get_tache_by_id(tache_id_global)
+        with tab1:
+            st.dataframe(taches_filtrees, use_container_width=True)
 
-        if tache_global is not None:
-            orgs_for_edit = get_organisations()
-            org_options_edit = {"Aucun organisme lié": None}
-            for _, row in orgs_for_edit.iterrows():
-                org_options_edit[f"{row['nom']} (ID {row['id']})"] = row["id"]
+            if not taches_filtrees.empty:
+                taches_options_global = {
+                    f"{row['titre']} (ID {row['id']})": row["id"]
+                    for _, row in taches_filtrees.iterrows()
+                }
 
-            org_labels_edit = list(org_options_edit.keys())
-            current_org_label = "Aucun organisme lié"
-            for label, value in org_options_edit.items():
-                if value == tache_global["organisation_id"]:
-                    current_org_label = label
-                    break
+                tache_selection_global = st.selectbox(
+                    "Choisir une tâche à modifier ou supprimer",
+                    list(taches_options_global.keys()),
+                    key="tache_selection_global"
+                )
 
-            with st.form("form_modifier_tache_global"):
-                gt1, gt2 = st.columns(2)
+                tache_id_global = taches_options_global[tache_selection_global]
+                tache_global = get_tache_by_id(tache_id_global)
 
-                with gt1:
-                    titre_g_mod = st.text_input("Titre de la tâche *", value=tache_global["titre"])
-                    org_g_mod = st.selectbox(
-                        "Organisme lié",
-                        org_labels_edit,
-                        index=org_labels_edit.index(current_org_label)
+                if tache_global is not None:
+                    orgs_for_edit = get_organisations()
+                    org_options_edit = {"Aucun organisme lié": None}
+                    for _, row in orgs_for_edit.iterrows():
+                        org_options_edit[f"{row['nom']} (ID {row['id']})"] = row["id"]
+
+                    org_labels_edit = list(org_options_edit.keys())
+                    current_org_label = "Aucun organisme lié"
+                    for label, value in org_options_edit.items():
+                        if value == tache_global["organisation_id"]:
+                            current_org_label = label
+                            break
+
+                    with st.form("form_modifier_tache_global"):
+                        gt1, gt2 = st.columns(2)
+
+                        with gt1:
+                            titre_g_mod = st.text_input("Titre de la tâche *", value=tache_global["titre"])
+                            org_g_mod = st.selectbox(
+                                "Organisme lié",
+                                org_labels_edit,
+                                index=org_labels_edit.index(current_org_label)
+                            )
+                            responsable_g_mod = st.text_input(
+                                "Responsable",
+                                value=tache_global["responsable"] if tache_global["responsable"] else ""
+                            )
+                            echeance_g_value = pd.to_datetime(tache_global["echeance"]).date() if tache_global["echeance"] else date.today()
+                            echeance_g_mod = st.date_input(
+                                "Échéance",
+                                value=echeance_g_value,
+                                key=f"global_echeance_{tache_id_global}"
+                            )
+
+                        with gt2:
+                            statuts = ["À faire", "En cours", "Terminée"]
+                            priorites = ["Basse", "Moyenne", "Haute"]
+
+                            statut_g_mod = st.selectbox(
+                                "Statut",
+                                statuts,
+                                index=statuts.index(tache_global["statut"]) if tache_global["statut"] in statuts else 0,
+                                key=f"global_statut_{tache_id_global}"
+                            )
+                            priorite_g_mod = st.selectbox(
+                                "Priorité",
+                                priorites,
+                                index=priorites.index(tache_global["priorite"]) if tache_global["priorite"] in priorites else 1,
+                                key=f"global_priorite_{tache_id_global}"
+                            )
+                            notes_g_mod = st.text_area(
+                                "Notes",
+                                value=tache_global["notes"] if tache_global["notes"] else "",
+                                key=f"global_notes_{tache_id_global}"
+                            )
+
+                        submit_mod_tache_global = st.form_submit_button("Enregistrer les modifications de la tâche")
+
+                        if submit_mod_tache_global:
+                            if not titre_g_mod.strip():
+                                st.error("Le titre de la tâche est obligatoire.")
+                            else:
+                                modifier_tache(
+                                    tache_id_global,
+                                    org_options_edit[org_g_mod],
+                                    titre_g_mod.strip(),
+                                    responsable_g_mod.strip(),
+                                    str(echeance_g_mod),
+                                    statut_g_mod,
+                                    priorite_g_mod,
+                                    notes_g_mod.strip()
+                                )
+                                st.success("Tâche modifiée avec succès.")
+                                st.rerun()
+
+                    confirm_delete_tache_global = st.checkbox(
+                        "Je confirme la suppression de cette tâche.",
+                        key=f"delete_tache_global_{tache_id_global}"
                     )
-                    responsable_g_mod = st.text_input("Responsable", value=tache_global["responsable"] if tache_global["responsable"] else "")
-                    echeance_g_value = pd.to_datetime(tache_global["echeance"]).date() if tache_global["echeance"] else date.today()
-                    echeance_g_mod = st.date_input("Échéance", value=echeance_g_value, key=f"global_echeance_{tache_id_global}")
+                    if st.button("Supprimer cette tâche", key=f"btn_delete_tache_global_{tache_id_global}"):
+                        if confirm_delete_tache_global:
+                            supprimer_tache(tache_id_global)
+                            st.success("Tâche supprimée avec succès.")
+                            st.rerun()
+                        else:
+                            st.warning("Tu dois confirmer la suppression de la tâche.")
 
-                with gt2:
-                    statuts = ["À faire", "En cours", "Terminée"]
-                    priorites = ["Basse", "Moyenne", "Haute"]
+        with tab2:
+            col_todo, col_progress, col_done = st.columns(3)
 
-                    statut_g_mod = st.selectbox(
-                        "Statut",
-                        statuts,
-                        index=statuts.index(tache_global["statut"]) if tache_global["statut"] in statuts else 0,
-                        key=f"global_statut_{tache_id_global}"
-                    )
-                    priorite_g_mod = st.selectbox(
-                        "Priorité",
-                        priorites,
-                        index=priorites.index(tache_global["priorite"]) if tache_global["priorite"] in priorites else 1,
-                        key=f"global_priorite_{tache_id_global}"
-                    )
-                    notes_g_mod = st.text_area("Notes", value=tache_global["notes"] if tache_global["notes"] else "", key=f"global_notes_{tache_id_global}")
-
-                submit_mod_tache_global = st.form_submit_button("Enregistrer les modifications de la tâche")
-
-                if submit_mod_tache_global:
-                    if not titre_g_mod.strip():
-                        st.error("Le titre de la tâche est obligatoire.")
-                    else:
-                        modifier_tache(
-                            tache_id_global,
-                            org_options_edit[org_g_mod],
-                            titre_g_mod.strip(),
-                            responsable_g_mod.strip(),
-                            str(echeance_g_mod),
-                            statut_g_mod,
-                            priorite_g_mod,
-                            notes_g_mod.strip()
-                        )
-                        st.success("Tâche modifiée avec succès.")
-                        st.rerun()
-
-            confirm_delete_tache_global = st.checkbox(
-                "Je confirme la suppression de cette tâche.",
-                key=f"delete_tache_global_{tache_id_global}"
-            )
-            if st.button("Supprimer cette tâche", key=f"btn_delete_tache_global_{tache_id_global}"):
-                if confirm_delete_tache_global:
-                    supprimer_tache(tache_id_global)
-                    st.success("Tâche supprimée avec succès.")
-                    st.rerun()
+            with col_todo:
+                st.markdown("#### À faire")
+                todo_df = taches_filtrees[taches_filtrees["statut"] == "À faire"]
+                if todo_df.empty:
+                    st.info("Aucune tâche.")
                 else:
-                    st.warning("Tu dois confirmer la suppression de la tâche.")
+                    for _, row in todo_df.iterrows():
+                        st.markdown(
+                            f"""
+**{row['titre']}**  
+Responsable : {row['responsable'] if row['responsable'] else '-'}  
+Échéance : {row['echeance'] if row['echeance'] else '-'}  
+Priorité : {row['priorite'] if row['priorite'] else '-'}  
+Organisme : {row['organisation']}
+"""
+                        )
+                        if st.button(f"Passer en cours #{row['id']}", key=f"todo_to_progress_{row['id']}"):
+                            modifier_tache(
+                                row["id"],
+                                get_tache_by_id(row["id"])["organisation_id"],
+                                get_tache_by_id(row["id"])["titre"],
+                                get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
+                                get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
+                                "En cours",
+                                get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
+                                get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
+                            )
+                            st.rerun()
+                        st.divider()
+
+            with col_progress:
+                st.markdown("#### En cours")
+                progress_df = taches_filtrees[taches_filtrees["statut"] == "En cours"]
+                if progress_df.empty:
+                    st.info("Aucune tâche.")
+                else:
+                    for _, row in progress_df.iterrows():
+                        st.markdown(
+                            f"""
+**{row['titre']}**  
+Responsable : {row['responsable'] if row['responsable'] else '-'}  
+Échéance : {row['echeance'] if row['echeance'] else '-'}  
+Priorité : {row['priorite'] if row['priorite'] else '-'}  
+Organisme : {row['organisation']}
+"""
+                        )
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button(f"Revenir à faire #{row['id']}", key=f"progress_to_todo_{row['id']}"):
+                                modifier_tache(
+                                    row["id"],
+                                    get_tache_by_id(row["id"])["organisation_id"],
+                                    get_tache_by_id(row["id"])["titre"],
+                                    get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
+                                    get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
+                                    "À faire",
+                                    get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
+                                    get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
+                                )
+                                st.rerun()
+                        with c2:
+                            if st.button(f"Terminer #{row['id']}", key=f"progress_to_done_{row['id']}"):
+                                modifier_tache(
+                                    row["id"],
+                                    get_tache_by_id(row["id"])["organisation_id"],
+                                    get_tache_by_id(row["id"])["titre"],
+                                    get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
+                                    get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
+                                    "Terminée",
+                                    get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
+                                    get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
+                                )
+                                st.rerun()
+                        st.divider()
+
+            with col_done:
+                st.markdown("#### Terminée")
+                done_df = taches_filtrees[taches_filtrees["statut"] == "Terminée"]
+                if done_df.empty:
+                    st.info("Aucune tâche.")
+                else:
+                    for _, row in done_df.iterrows():
+                        st.markdown(
+                            f"""
+**{row['titre']}**  
+Responsable : {row['responsable'] if row['responsable'] else '-'}  
+Échéance : {row['echeance'] if row['echeance'] else '-'}  
+Priorité : {row['priorite'] if row['priorite'] else '-'}  
+Organisme : {row['organisation']}
+"""
+                        )
+                        if st.button(f"Réouvrir #{row['id']}", key=f"done_to_progress_{row['id']}"):
+                            modifier_tache(
+                                row["id"],
+                                get_tache_by_id(row["id"])["organisation_id"],
+                                get_tache_by_id(row["id"])["titre"],
+                                get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
+                                get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
+                                "En cours",
+                                get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
+                                get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
+                            )
+                            st.rerun()
+                        st.divider()
