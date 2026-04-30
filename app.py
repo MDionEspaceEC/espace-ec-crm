@@ -35,6 +35,19 @@ def init_db():
     """)
 
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS employes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL,
+            poste TEXT,
+            courriel TEXT,
+            telephone TEXT,
+            statut_emploi TEXT,
+            heures_semaine REAL,
+            actif TEXT
+        )
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS suivis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organisation_id INTEGER NOT NULL,
@@ -63,13 +76,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS taches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organisation_id INTEGER,
+            employe_id INTEGER,
             titre TEXT NOT NULL,
             responsable TEXT,
             echeance TEXT,
             statut TEXT,
             priorite TEXT,
             notes TEXT,
-            FOREIGN KEY (organisation_id) REFERENCES organisations (id)
+            FOREIGN KEY (organisation_id) REFERENCES organisations (id),
+            FOREIGN KEY (employe_id) REFERENCES employes (id)
         )
     """)
 
@@ -79,25 +94,16 @@ def init_db():
 
 def get_organisations():
     conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT * FROM organisations ORDER BY nom ASC",
-        conn
-    )
+    df = pd.read_sql_query("SELECT * FROM organisations ORDER BY nom ASC", conn)
     conn.close()
     return df
 
 
 def get_organisation_by_id(org_id):
     conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT * FROM organisations WHERE id = ?",
-        conn,
-        params=(org_id,)
-    )
+    df = pd.read_sql_query("SELECT * FROM organisations WHERE id = ?", conn, params=(org_id,))
     conn.close()
-    if df.empty:
-        return None
-    return df.iloc[0]
+    return None if df.empty else df.iloc[0]
 
 
 def ajouter_organisation(nom, type_org, ville, telephone, courriel, statut, notes):
@@ -134,6 +140,56 @@ def supprimer_organisation(org_id):
     conn.close()
 
 
+def get_employes():
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM employes ORDER BY nom ASC", conn)
+    conn.close()
+    return df
+
+
+def get_employe_by_id(employe_id):
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM employes WHERE id = ?", conn, params=(employe_id,))
+    conn.close()
+    return None if df.empty else df.iloc[0]
+
+
+def ajouter_employe(nom, poste, courriel, telephone, statut_emploi, heures_semaine, actif):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO employes (nom, poste, courriel, telephone, statut_emploi, heures_semaine, actif)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (nom, poste, courriel, telephone, statut_emploi, heures_semaine, actif))
+    conn.commit()
+    conn.close()
+
+
+def modifier_employe(employe_id, nom, poste, courriel, telephone, statut_emploi, heures_semaine, actif):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE employes
+        SET nom = ?, poste = ?, courriel = ?, telephone = ?, statut_emploi = ?, heures_semaine = ?, actif = ?
+        WHERE id = ?
+    """, (nom, poste, courriel, telephone, statut_emploi, heures_semaine, actif, employe_id))
+    conn.commit()
+    conn.close()
+
+
+def supprimer_employe(employe_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE taches
+        SET employe_id = NULL, responsable = ''
+        WHERE employe_id = ?
+    """, (employe_id,))
+    cur.execute("DELETE FROM employes WHERE id = ?", (employe_id,))
+    conn.commit()
+    conn.close()
+
+
 def get_suivis():
     conn = get_connection()
     df = pd.read_sql_query("""
@@ -155,12 +211,7 @@ def get_suivis():
 def get_suivis_by_organisation(org_id):
     conn = get_connection()
     df = pd.read_sql_query("""
-        SELECT
-            id,
-            date_suivi,
-            type_suivi,
-            resume,
-            prochaine_action
+        SELECT id, date_suivi, type_suivi, resume, prochaine_action
         FROM suivis
         WHERE organisation_id = ?
         ORDER BY date_suivi DESC, id DESC
@@ -183,32 +234,13 @@ def ajouter_suivi(organisation_id, date_suivi, type_suivi, resume, prochaine_act
 def get_contacts_by_organisation(org_id):
     conn = get_connection()
     df = pd.read_sql_query("""
-        SELECT
-            id,
-            nom,
-            role,
-            telephone,
-            courriel,
-            notes
+        SELECT id, nom, role, telephone, courriel, notes
         FROM contacts
         WHERE organisation_id = ?
         ORDER BY nom ASC
     """, conn, params=(org_id,))
     conn.close()
     return df
-
-
-def get_contact_by_id(contact_id):
-    conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT * FROM contacts WHERE id = ?",
-        conn,
-        params=(contact_id,)
-    )
-    conn.close()
-    if df.empty:
-        return None
-    return df.iloc[0]
 
 
 def ajouter_contact(organisation_id, nom, role, telephone, courriel, notes):
@@ -222,26 +254,6 @@ def ajouter_contact(organisation_id, nom, role, telephone, courriel, notes):
     conn.close()
 
 
-def modifier_contact(contact_id, nom, role, telephone, courriel, notes):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE contacts
-        SET nom = ?, role = ?, telephone = ?, courriel = ?, notes = ?
-        WHERE id = ?
-    """, (nom, role, telephone, courriel, notes, contact_id))
-    conn.commit()
-    conn.close()
-
-
-def supprimer_contact(contact_id):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
-    conn.commit()
-    conn.close()
-
-
 def get_taches():
     conn = get_connection()
     df = pd.read_sql_query("""
@@ -249,6 +261,7 @@ def get_taches():
             taches.id,
             taches.titre,
             COALESCE(organisations.nom, '-') AS organisation,
+            COALESCE(employes.nom, taches.responsable, '-') AS employe_assigne,
             taches.responsable,
             taches.echeance,
             taches.statut,
@@ -256,6 +269,7 @@ def get_taches():
             taches.notes
         FROM taches
         LEFT JOIN organisations ON taches.organisation_id = organisations.id
+        LEFT JOIN employes ON taches.employe_id = employes.id
         ORDER BY
             CASE
                 WHEN taches.statut = 'À faire' THEN 1
@@ -280,7 +294,8 @@ def get_taches_by_organisation(org_id):
             echeance,
             statut,
             priorite,
-            notes
+            notes,
+            employe_id
         FROM taches
         WHERE organisation_id = ?
         ORDER BY echeance ASC, id DESC
@@ -289,38 +304,59 @@ def get_taches_by_organisation(org_id):
     return df
 
 
+def get_taches_by_employe(employe_id):
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        SELECT
+            taches.id,
+            taches.titre,
+            COALESCE(organisations.nom, '-') AS organisation,
+            taches.echeance,
+            taches.statut,
+            taches.priorite,
+            taches.notes
+        FROM taches
+        LEFT JOIN organisations ON taches.organisation_id = organisations.id
+        WHERE taches.employe_id = ?
+        ORDER BY
+            CASE
+                WHEN taches.statut = 'À faire' THEN 1
+                WHEN taches.statut = 'En cours' THEN 2
+                WHEN taches.statut = 'Terminée' THEN 3
+                ELSE 4
+            END,
+            taches.echeance ASC
+    """, conn, params=(employe_id,))
+    conn.close()
+    return df
+
+
 def get_tache_by_id(tache_id):
     conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT * FROM taches WHERE id = ?",
-        conn,
-        params=(tache_id,)
-    )
+    df = pd.read_sql_query("SELECT * FROM taches WHERE id = ?", conn, params=(tache_id,))
     conn.close()
-    if df.empty:
-        return None
-    return df.iloc[0]
+    return None if df.empty else df.iloc[0]
 
 
-def ajouter_tache(organisation_id, titre, responsable, echeance, statut, priorite, notes):
+def ajouter_tache(organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO taches (organisation_id, titre, responsable, echeance, statut, priorite, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (organisation_id, titre, responsable, echeance, statut, priorite, notes))
+        INSERT INTO taches (organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes))
     conn.commit()
     conn.close()
 
 
-def modifier_tache(tache_id, organisation_id, titre, responsable, echeance, statut, priorite, notes):
+def modifier_tache(tache_id, organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         UPDATE taches
-        SET organisation_id = ?, titre = ?, responsable = ?, echeance = ?, statut = ?, priorite = ?, notes = ?
+        SET organisation_id = ?, employe_id = ?, titre = ?, responsable = ?, echeance = ?, statut = ?, priorite = ?, notes = ?
         WHERE id = ?
-    """, (organisation_id, titre, responsable, echeance, statut, priorite, notes, tache_id))
+    """, (organisation_id, employe_id, titre, responsable, echeance, statut, priorite, notes, tache_id))
     conn.commit()
     conn.close()
 
@@ -339,35 +375,31 @@ if "org_selectionnee" not in st.session_state:
     st.session_state.org_selectionnee = None
 
 st.title("Espace EC CRM")
-st.caption("Base interne simple pour la gestion des organismes, suivis, contacts et tâches.")
+st.caption("Base interne simple pour la gestion des organismes, employés, suivis, contacts et tâches.")
 
 menu = st.sidebar.radio(
     "Navigation",
-    ["Tableau de bord", "Organismes", "Fiche organisme", "Suivis", "Tâches"]
+    ["Tableau de bord", "Organismes", "Employés", "Fiche organisme", "Suivis", "Tâches"]
 )
 
 if menu == "Tableau de bord":
     orgs = get_organisations()
+    employes = get_employes()
     suivis = get_suivis()
     taches = get_taches()
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Organismes", len(orgs))
-    col2.metric("Suivis", len(suivis))
-    col3.metric("Tâches", len(taches))
-
-    st.subheader("Derniers suivis")
-    if suivis.empty:
-        st.info("Aucun suivi enregistré pour le moment.")
-    else:
-        st.dataframe(suivis.head(8), use_container_width=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Organismes", len(orgs))
+    c2.metric("Employés", len(employes))
+    c3.metric("Suivis", len(suivis))
+    c4.metric("Tâches", len(taches))
 
     st.subheader("Tâches en cours")
-    if taches.empty:
-        st.info("Aucune tâche enregistrée.")
+    taches_actives = taches[taches["statut"].isin(["À faire", "En cours"])] if not taches.empty else pd.DataFrame()
+    if taches_actives.empty:
+        st.info("Aucune tâche active.")
     else:
-        taches_actives = taches[taches["statut"].isin(["À faire", "En cours"])]
-        st.dataframe(taches_actives.head(8), use_container_width=True)
+        st.dataframe(taches_actives.head(10), use_container_width=True)
 
 elif menu == "Organismes":
     st.subheader("Ajouter un organisme")
@@ -377,19 +409,13 @@ elif menu == "Organismes":
 
         with col1:
             nom = st.text_input("Nom de l'organisme *")
-            type_org = st.selectbox(
-                "Type d'organisme",
-                ["", "OBNL", "Coopérative", "Entreprise d'économie sociale", "Institution", "Autre"]
-            )
+            type_org = st.selectbox("Type d'organisme", ["", "OBNL", "Coopérative", "Entreprise d'économie sociale", "Institution", "Autre"])
             ville = st.text_input("Ville")
             telephone = st.text_input("Téléphone")
 
         with col2:
             courriel = st.text_input("Courriel")
-            statut = st.selectbox(
-                "Statut",
-                ["Actif", "En démarrage", "À relancer", "Inactif"]
-            )
+            statut = st.selectbox("Statut", ["Actif", "En démarrage", "À relancer", "Inactif"])
             notes = st.text_area("Notes")
 
         submit_org = st.form_submit_button("Enregistrer l'organisme")
@@ -398,15 +424,7 @@ elif menu == "Organismes":
             if not nom.strip():
                 st.error("Le nom de l'organisme est obligatoire.")
             else:
-                ajouter_organisation(
-                    nom.strip(),
-                    type_org,
-                    ville.strip(),
-                    telephone.strip(),
-                    courriel.strip(),
-                    statut,
-                    notes.strip()
-                )
+                ajouter_organisation(nom.strip(), type_org, ville.strip(), telephone.strip(), courriel.strip(), statut, notes.strip())
                 st.success("Organisme ajouté avec succès.")
                 st.rerun()
 
@@ -416,26 +434,121 @@ elif menu == "Organismes":
     if orgs.empty:
         st.info("Aucun organisme enregistré.")
     else:
-        recherche = st.text_input("Rechercher un organisme par nom")
-        if recherche:
-            orgs = orgs[orgs["nom"].str.contains(recherche, case=False, na=False)]
-
         st.dataframe(orgs, use_container_width=True)
 
-        options = {
-            f"{row['nom']} (ID {row['id']})": row["id"]
-            for _, row in orgs.iterrows()
-        }
-
-        selection = st.selectbox(
-            "Choisir un organisme pour ouvrir sa fiche",
-            [""] + list(options.keys())
-        )
+        options = {f"{row['nom']} (ID {row['id']})": row["id"] for _, row in orgs.iterrows()}
+        selection = st.selectbox("Choisir un organisme pour ouvrir sa fiche", [""] + list(options.keys()))
 
         if st.button("Ouvrir la fiche"):
             if selection:
                 st.session_state.org_selectionnee = options[selection]
                 st.rerun()
+
+elif menu == "Employés":
+    st.subheader("Ajouter un employé")
+
+    with st.form("form_employe", clear_on_submit=True):
+        e1, e2 = st.columns(2)
+
+        with e1:
+            nom = st.text_input("Nom de l'employé *")
+            poste = st.text_input("Poste")
+            courriel = st.text_input("Courriel")
+            telephone = st.text_input("Téléphone")
+
+        with e2:
+            statut_emploi = st.selectbox("Statut d'emploi", ["Temps plein", "Temps partiel", "Contractuel", "Stagiaire", "Autre"])
+            heures_semaine = st.number_input("Heures par semaine", min_value=0.0, step=0.5, value=35.0)
+            actif = st.selectbox("Actif", ["Oui", "Non"])
+
+        submit_employe = st.form_submit_button("Enregistrer l'employé")
+
+        if submit_employe:
+            if not nom.strip():
+                st.error("Le nom de l'employé est obligatoire.")
+            else:
+                ajouter_employe(
+                    nom.strip(),
+                    poste.strip(),
+                    courriel.strip(),
+                    telephone.strip(),
+                    statut_emploi,
+                    heures_semaine,
+                    actif
+                )
+                st.success("Employé ajouté avec succès.")
+                st.rerun()
+
+    st.subheader("Liste des employés")
+    employes = get_employes()
+
+    if employes.empty:
+        st.info("Aucun employé enregistré.")
+    else:
+        st.dataframe(employes, use_container_width=True)
+
+        employe_options = {f"{row['nom']} (ID {row['id']})": row["id"] for _, row in employes.iterrows()}
+        employe_selection = st.selectbox("Choisir un employé", list(employe_options.keys()))
+        employe_id = employe_options[employe_selection]
+        employe = get_employe_by_id(employe_id)
+
+        if employe is not None:
+            st.markdown("### Modifier l'employé")
+
+            with st.form("form_modifier_employe"):
+                me1, me2 = st.columns(2)
+
+                with me1:
+                    nom_mod = st.text_input("Nom de l'employé *", value=employe["nom"])
+                    poste_mod = st.text_input("Poste", value=employe["poste"] if employe["poste"] else "")
+                    courriel_mod = st.text_input("Courriel", value=employe["courriel"] if employe["courriel"] else "")
+                    telephone_mod = st.text_input("Téléphone", value=employe["telephone"] if employe["telephone"] else "")
+
+                with me2:
+                    statuts = ["Temps plein", "Temps partiel", "Contractuel", "Stagiaire", "Autre"]
+                    statut_mod = st.selectbox(
+                        "Statut d'emploi",
+                        statuts,
+                        index=statuts.index(employe["statut_emploi"]) if employe["statut_emploi"] in statuts else 0
+                    )
+                    heures_mod = st.number_input("Heures par semaine", min_value=0.0, step=0.5, value=float(employe["heures_semaine"]) if employe["heures_semaine"] else 35.0)
+                    actif_mod = st.selectbox("Actif", ["Oui", "Non"], index=0 if employe["actif"] == "Oui" else 1)
+
+                submit_mod_employe = st.form_submit_button("Enregistrer les modifications")
+
+                if submit_mod_employe:
+                    if not nom_mod.strip():
+                        st.error("Le nom de l'employé est obligatoire.")
+                    else:
+                        modifier_employe(
+                            employe_id,
+                            nom_mod.strip(),
+                            poste_mod.strip(),
+                            courriel_mod.strip(),
+                            telephone_mod.strip(),
+                            statut_mod,
+                            heures_mod,
+                            actif_mod
+                        )
+                        st.success("Employé modifié avec succès.")
+                        st.rerun()
+
+            st.markdown("### Tâches de l'employé")
+            taches_employe = get_taches_by_employe(employe_id)
+
+            if taches_employe.empty:
+                st.info("Aucune tâche assignée à cet employé.")
+            else:
+                st.dataframe(taches_employe, use_container_width=True)
+
+            confirm_delete_employe = st.checkbox("Je confirme la suppression de cet employé.")
+            if st.button("Supprimer cet employé"):
+                if confirm_delete_employe:
+                    supprimer_employe(employe_id)
+                    st.success("Employé supprimé avec succès.")
+                    st.rerun()
+                else:
+                    st.warning("Tu dois confirmer la suppression.")
 
 elif menu == "Fiche organisme":
     orgs = get_organisations()
@@ -443,11 +556,7 @@ elif menu == "Fiche organisme":
     if orgs.empty:
         st.info("Aucun organisme disponible.")
     else:
-        options = {
-            f"{row['nom']} (ID {row['id']})": row["id"]
-            for _, row in orgs.iterrows()
-        }
-
+        options = {f"{row['nom']} (ID {row['id']})": row["id"] for _, row in orgs.iterrows()}
         labels = list(options.keys())
         default_index = 0
 
@@ -455,13 +564,7 @@ elif menu == "Fiche organisme":
             current_label = [k for k, v in options.items() if v == st.session_state.org_selectionnee][0]
             default_index = labels.index(current_label)
 
-        selection = st.selectbox(
-            "Sélectionner un organisme",
-            labels,
-            index=default_index,
-            key="fiche_org_selectbox"
-        )
-
+        selection = st.selectbox("Sélectionner un organisme", labels, index=default_index, key="fiche_org_selectbox")
         st.session_state.org_selectionnee = options[selection]
         org_id = st.session_state.org_selectionnee
         org = get_organisation_by_id(org_id)
@@ -470,68 +573,9 @@ elif menu == "Fiche organisme":
             st.error("Organisme introuvable.")
         else:
             st.subheader(f"Fiche de : {org['nom']}")
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("ID", int(org["id"]))
-            col2.metric("Ville", org["ville"] if org["ville"] else "-")
-            col3.metric("Statut", org["statut"] if org["statut"] else "-")
-
-            st.markdown("### Informations")
-            info1, info2 = st.columns(2)
-
-            with info1:
-                st.write(f"**Type** : {org['type_org'] if org['type_org'] else '-'}")
-                st.write(f"**Téléphone** : {org['telephone'] if org['telephone'] else '-'}")
-
-            with info2:
-                st.write(f"**Courriel** : {org['courriel'] if org['courriel'] else '-'}")
-                st.write(f"**Notes** : {org['notes'] if org['notes'] else '-'}")
-
-            st.markdown("### Modifier l'organisme")
-
-            types_disponibles = ["", "OBNL", "Coopérative", "Entreprise d'économie sociale", "Institution", "Autre"]
-            statuts_disponibles = ["Actif", "En démarrage", "À relancer", "Inactif"]
-
-            with st.form("form_modifier_organisation"):
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    nom_mod = st.text_input("Nom de l'organisme *", value=org["nom"])
-                    type_mod = st.selectbox(
-                        "Type d'organisme",
-                        types_disponibles,
-                        index=types_disponibles.index(org["type_org"]) if org["type_org"] in types_disponibles else 0
-                    )
-                    ville_mod = st.text_input("Ville", value=org["ville"] if org["ville"] else "")
-                    telephone_mod = st.text_input("Téléphone", value=org["telephone"] if org["telephone"] else "")
-
-                with col2:
-                    courriel_mod = st.text_input("Courriel", value=org["courriel"] if org["courriel"] else "")
-                    statut_mod = st.selectbox(
-                        "Statut",
-                        statuts_disponibles,
-                        index=statuts_disponibles.index(org["statut"]) if org["statut"] in statuts_disponibles else 0
-                    )
-                    notes_mod = st.text_area("Notes", value=org["notes"] if org["notes"] else "")
-
-                submit_mod = st.form_submit_button("Enregistrer les modifications")
-
-                if submit_mod:
-                    if not nom_mod.strip():
-                        st.error("Le nom de l'organisme est obligatoire.")
-                    else:
-                        modifier_organisation(
-                            org_id,
-                            nom_mod.strip(),
-                            type_mod,
-                            ville_mod.strip(),
-                            telephone_mod.strip(),
-                            courriel_mod.strip(),
-                            statut_mod,
-                            notes_mod.strip()
-                        )
-                        st.success("Organisme modifié avec succès.")
-                        st.rerun()
+            st.write(f"**Ville** : {org['ville'] if org['ville'] else '-'}")
+            st.write(f"**Statut** : {org['statut'] if org['statut'] else '-'}")
+            st.write(f"**Notes** : {org['notes'] if org['notes'] else '-'}")
 
             st.markdown("### Contacts liés")
             contacts_org = get_contacts_by_organisation(org_id)
@@ -552,14 +596,7 @@ elif menu == "Fiche organisme":
                     if not contact_nom.strip():
                         st.error("Le nom du contact est obligatoire.")
                     else:
-                        ajouter_contact(
-                            org_id,
-                            contact_nom.strip(),
-                            contact_role.strip(),
-                            contact_telephone.strip(),
-                            contact_courriel.strip(),
-                            contact_notes.strip()
-                        )
+                        ajouter_contact(org_id, contact_nom.strip(), contact_role.strip(), contact_telephone.strip(), contact_courriel.strip(), contact_notes.strip())
                         st.success("Contact ajouté avec succès.")
                         st.rerun()
 
@@ -568,65 +605,8 @@ elif menu == "Fiche organisme":
             else:
                 st.dataframe(contacts_org, use_container_width=True)
 
-                contacts_options = {
-                    f"{row['nom']} (ID {row['id']})": row["id"]
-                    for _, row in contacts_org.iterrows()
-                }
-
-                contact_selection = st.selectbox(
-                    "Choisir un contact à modifier ou supprimer",
-                    list(contacts_options.keys()),
-                    key="contact_selection"
-                )
-
-                contact_id = contacts_options[contact_selection]
-                contact = get_contact_by_id(contact_id)
-
-                if contact is not None:
-                    with st.form("form_modifier_contact"):
-                        mc1, mc2 = st.columns(2)
-
-                        with mc1:
-                            nom_c_mod = st.text_input("Nom du contact *", value=contact["nom"])
-                            role_c_mod = st.text_input("Rôle / fonction", value=contact["role"] if contact["role"] else "")
-                            tel_c_mod = st.text_input("Téléphone", value=contact["telephone"] if contact["telephone"] else "")
-
-                        with mc2:
-                            courriel_c_mod = st.text_input("Courriel", value=contact["courriel"] if contact["courriel"] else "")
-                            notes_c_mod = st.text_area("Notes", value=contact["notes"] if contact["notes"] else "")
-
-                        submit_mod_contact = st.form_submit_button("Enregistrer les modifications du contact")
-
-                        if submit_mod_contact:
-                            if not nom_c_mod.strip():
-                                st.error("Le nom du contact est obligatoire.")
-                            else:
-                                modifier_contact(
-                                    contact_id,
-                                    nom_c_mod.strip(),
-                                    role_c_mod.strip(),
-                                    tel_c_mod.strip(),
-                                    courriel_c_mod.strip(),
-                                    notes_c_mod.strip()
-                                )
-                                st.success("Contact modifié avec succès.")
-                                st.rerun()
-
-                    confirm_delete_contact = st.checkbox(
-                        "Je confirme la suppression de ce contact.",
-                        key=f"delete_contact_{contact_id}"
-                    )
-                    if st.button("Supprimer ce contact", key=f"btn_delete_contact_{contact_id}"):
-                        if confirm_delete_contact:
-                            supprimer_contact(contact_id)
-                            st.success("Contact supprimé avec succès.")
-                            st.rerun()
-                        else:
-                            st.warning("Tu dois confirmer la suppression du contact.")
-
             st.markdown("### Suivis liés")
             suivis_org = get_suivis_by_organisation(org_id)
-
             if suivis_org.empty:
                 st.info("Aucun suivi pour cet organisme.")
             else:
@@ -634,12 +614,16 @@ elif menu == "Fiche organisme":
 
             st.markdown("### Tâches liées")
             taches_org = get_taches_by_organisation(org_id)
+            employes = get_employes()
+            employe_options = {"Non assigné": None}
+            for _, row in employes.iterrows():
+                employe_options[f"{row['nom']} (ID {row['id']})"] = row["id"]
 
             with st.form("form_tache_fiche", clear_on_submit=True):
                 t1, t2 = st.columns(2)
                 with t1:
                     tache_titre = st.text_input("Titre de la tâche *")
-                    tache_responsable = st.text_input("Responsable")
+                    employe_label = st.selectbox("Employé assigné", list(employe_options.keys()), key="employe_tache_fiche")
                     tache_echeance = st.date_input("Échéance", value=date.today(), key="echeance_fiche")
                 with t2:
                     tache_statut = st.selectbox("Statut", ["À faire", "En cours", "Terminée"], key="statut_fiche")
@@ -652,10 +636,17 @@ elif menu == "Fiche organisme":
                     if not tache_titre.strip():
                         st.error("Le titre de la tâche est obligatoire.")
                     else:
+                        employe_id = employe_options[employe_label]
+                        responsable_nom = ""
+                        if employe_id is not None:
+                            employe_obj = get_employe_by_id(employe_id)
+                            responsable_nom = employe_obj["nom"] if employe_obj is not None else ""
+
                         ajouter_tache(
                             org_id,
+                            employe_id,
                             tache_titre.strip(),
-                            tache_responsable.strip(),
+                            responsable_nom,
                             str(tache_echeance),
                             tache_statut,
                             tache_priorite,
@@ -669,93 +660,8 @@ elif menu == "Fiche organisme":
             else:
                 st.dataframe(taches_org, use_container_width=True)
 
-                taches_options = {
-                    f"{row['titre']} (ID {row['id']})": row["id"]
-                    for _, row in taches_org.iterrows()
-                }
-
-                tache_selection = st.selectbox(
-                    "Choisir une tâche à modifier ou supprimer",
-                    list(taches_options.keys()),
-                    key="tache_selection_fiche"
-                )
-
-                tache_id = taches_options[tache_selection]
-                tache = get_tache_by_id(tache_id)
-
-                if tache is not None:
-                    with st.form("form_modifier_tache_fiche"):
-                        mt1, mt2 = st.columns(2)
-
-                        with mt1:
-                            titre_t_mod = st.text_input("Titre de la tâche *", value=tache["titre"])
-                            responsable_t_mod = st.text_input("Responsable", value=tache["responsable"] if tache["responsable"] else "")
-                            echeance_value = pd.to_datetime(tache["echeance"]).date() if tache["echeance"] else date.today()
-                            echeance_t_mod = st.date_input("Échéance", value=echeance_value, key=f"edit_echeance_{tache_id}")
-
-                        with mt2:
-                            statuts = ["À faire", "En cours", "Terminée"]
-                            priorites = ["Basse", "Moyenne", "Haute"]
-
-                            statut_t_mod = st.selectbox(
-                                "Statut",
-                                statuts,
-                                index=statuts.index(tache["statut"]) if tache["statut"] in statuts else 0,
-                                key=f"edit_statut_{tache_id}"
-                            )
-                            priorite_t_mod = st.selectbox(
-                                "Priorité",
-                                priorites,
-                                index=priorites.index(tache["priorite"]) if tache["priorite"] in priorites else 1,
-                                key=f"edit_priorite_{tache_id}"
-                            )
-                            notes_t_mod = st.text_area("Notes", value=tache["notes"] if tache["notes"] else "", key=f"edit_notes_{tache_id}")
-
-                        submit_mod_tache = st.form_submit_button("Enregistrer les modifications de la tâche")
-
-                        if submit_mod_tache:
-                            if not titre_t_mod.strip():
-                                st.error("Le titre de la tâche est obligatoire.")
-                            else:
-                                modifier_tache(
-                                    tache_id,
-                                    org_id,
-                                    titre_t_mod.strip(),
-                                    responsable_t_mod.strip(),
-                                    str(echeance_t_mod),
-                                    statut_t_mod,
-                                    priorite_t_mod,
-                                    notes_t_mod.strip()
-                                )
-                                st.success("Tâche modifiée avec succès.")
-                                st.rerun()
-
-                    confirm_delete_tache = st.checkbox(
-                        "Je confirme la suppression de cette tâche.",
-                        key=f"delete_tache_{tache_id}"
-                    )
-                    if st.button("Supprimer cette tâche", key=f"btn_delete_tache_{tache_id}"):
-                        if confirm_delete_tache:
-                            supprimer_tache(tache_id)
-                            st.success("Tâche supprimée avec succès.")
-                            st.rerun()
-                        else:
-                            st.warning("Tu dois confirmer la suppression de la tâche.")
-
-            st.markdown("### Suppression")
-            confirmation = st.checkbox("Je confirme la suppression de cet organisme et de ses éléments liés.")
-            if st.button("Supprimer cet organisme", type="secondary"):
-                if confirmation:
-                    supprimer_organisation(org_id)
-                    st.session_state.org_selectionnee = None
-                    st.success("Organisme supprimé avec succès.")
-                    st.rerun()
-                else:
-                    st.warning("Tu dois confirmer la suppression avant de continuer.")
-
 elif menu == "Suivis":
     st.subheader("Ajouter un suivi")
-
     orgs = get_organisations()
 
     if orgs.empty:
@@ -779,19 +685,12 @@ elif menu == "Suivis":
                 if not resume.strip():
                     st.error("Le résumé du suivi est obligatoire.")
                 else:
-                    ajouter_suivi(
-                        options_orgs[organisation_label],
-                        str(date_suivi),
-                        type_suivi,
-                        resume.strip(),
-                        prochaine_action.strip()
-                    )
+                    ajouter_suivi(options_orgs[organisation_label], str(date_suivi), type_suivi, resume.strip(), prochaine_action.strip())
                     st.success("Suivi ajouté avec succès.")
                     st.rerun()
 
     st.subheader("Historique des suivis")
     suivis = get_suivis()
-
     if suivis.empty:
         st.info("Aucun suivi enregistré.")
     else:
@@ -801,12 +700,16 @@ elif menu == "Tâches":
     st.subheader("Planification des tâches")
 
     orgs = get_organisations()
-    options_orgs = {"Aucun organisme lié": None}
+    employes = get_employes()
 
-    if not orgs.empty:
-        for _, row in orgs.iterrows():
-            label = f"{row['nom']} ({row['ville']})" if row['ville'] else row['nom']
-            options_orgs[label] = row["id"]
+    options_orgs = {"Aucun organisme lié": None}
+    for _, row in orgs.iterrows():
+        label = f"{row['nom']} ({row['ville']})" if row['ville'] else row['nom']
+        options_orgs[label] = row["id"]
+
+    options_employes = {"Non assigné": None}
+    for _, row in employes.iterrows():
+        options_employes[f"{row['nom']} (ID {row['id']})"] = row["id"]
 
     with st.form("form_tache_generale", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -814,7 +717,7 @@ elif menu == "Tâches":
         with col1:
             titre = st.text_input("Titre de la tâche *")
             org_label = st.selectbox("Organisme lié", list(options_orgs.keys()))
-            responsable = st.text_input("Responsable")
+            employe_label = st.selectbox("Employé assigné", list(options_employes.keys()))
             echeance = st.date_input("Échéance", value=date.today(), key="echeance_generale")
 
         with col2:
@@ -828,10 +731,17 @@ elif menu == "Tâches":
             if not titre.strip():
                 st.error("Le titre de la tâche est obligatoire.")
             else:
+                employe_id = options_employes[employe_label]
+                responsable_nom = ""
+                if employe_id is not None:
+                    employe_obj = get_employe_by_id(employe_id)
+                    responsable_nom = employe_obj["nom"] if employe_obj is not None else ""
+
                 ajouter_tache(
                     options_orgs[org_label],
+                    employe_id,
                     titre.strip(),
-                    responsable.strip(),
+                    responsable_nom,
                     str(echeance),
                     statut,
                     priorite,
@@ -839,8 +749,6 @@ elif menu == "Tâches":
                 )
                 st.success("Tâche ajoutée avec succès.")
                 st.rerun()
-
-    st.markdown("### Vues de planification")
 
     taches = get_taches()
 
@@ -850,249 +758,42 @@ elif menu == "Tâches":
         f1, f2, f3 = st.columns(3)
 
         with f1:
-            filtre_statut = st.selectbox(
-                "Filtrer par statut",
-                ["Toutes", "À faire", "En cours", "Terminée"],
-                key="filtre_statut_planif"
-            )
+            filtre_statut = st.selectbox("Filtrer par statut", ["Toutes", "À faire", "En cours", "Terminée"])
 
         with f2:
-            responsables = ["Tous"] + sorted([r for r in taches["responsable"].dropna().unique() if str(r).strip() != ""])
-            filtre_responsable = st.selectbox(
-                "Filtrer par responsable",
-                responsables,
-                key="filtre_responsable_planif"
+            filtre_employe = st.selectbox(
+                "Filtrer par employé",
+                ["Tous"] + sorted([e for e in taches["employe_assigne"].dropna().unique() if str(e).strip() != "-"])
             )
 
         with f3:
-            filtre_priorite = st.selectbox(
-                "Filtrer par priorité",
-                ["Toutes", "Basse", "Moyenne", "Haute"],
-                key="filtre_priorite_planif"
-            )
+            filtre_priorite = st.selectbox("Filtrer par priorité", ["Toutes", "Basse", "Moyenne", "Haute"])
 
         taches_filtrees = taches.copy()
 
         if filtre_statut != "Toutes":
             taches_filtrees = taches_filtrees[taches_filtrees["statut"] == filtre_statut]
 
-        if filtre_responsable != "Tous":
-            taches_filtrees = taches_filtrees[taches_filtrees["responsable"] == filtre_responsable]
+        if filtre_employe != "Tous":
+            taches_filtrees = taches_filtrees[taches_filtrees["employe_assigne"] == filtre_employe]
 
         if filtre_priorite != "Toutes":
             taches_filtrees = taches_filtrees[taches_filtrees["priorite"] == filtre_priorite]
 
-        tab1, tab2 = st.tabs(["Vue tableau", "Vue kanban"])
+        tab1, tab2 = st.tabs(["Vue tableau", "Vue par employé"])
 
         with tab1:
             st.dataframe(taches_filtrees, use_container_width=True)
 
-            if not taches_filtrees.empty:
-                taches_options_global = {
-                    f"{row['titre']} (ID {row['id']})": row["id"]
-                    for _, row in taches_filtrees.iterrows()
-                }
-
-                tache_selection_global = st.selectbox(
-                    "Choisir une tâche à modifier ou supprimer",
-                    list(taches_options_global.keys()),
-                    key="tache_selection_global"
-                )
-
-                tache_id_global = taches_options_global[tache_selection_global]
-                tache_global = get_tache_by_id(tache_id_global)
-
-                if tache_global is not None:
-                    orgs_for_edit = get_organisations()
-                    org_options_edit = {"Aucun organisme lié": None}
-                    for _, row in orgs_for_edit.iterrows():
-                        org_options_edit[f"{row['nom']} (ID {row['id']})"] = row["id"]
-
-                    org_labels_edit = list(org_options_edit.keys())
-                    current_org_label = "Aucun organisme lié"
-                    for label, value in org_options_edit.items():
-                        if value == tache_global["organisation_id"]:
-                            current_org_label = label
-                            break
-
-                    with st.form("form_modifier_tache_global"):
-                        gt1, gt2 = st.columns(2)
-
-                        with gt1:
-                            titre_g_mod = st.text_input("Titre de la tâche *", value=tache_global["titre"])
-                            org_g_mod = st.selectbox(
-                                "Organisme lié",
-                                org_labels_edit,
-                                index=org_labels_edit.index(current_org_label)
-                            )
-                            responsable_g_mod = st.text_input(
-                                "Responsable",
-                                value=tache_global["responsable"] if tache_global["responsable"] else ""
-                            )
-                            echeance_g_value = pd.to_datetime(tache_global["echeance"]).date() if tache_global["echeance"] else date.today()
-                            echeance_g_mod = st.date_input(
-                                "Échéance",
-                                value=echeance_g_value,
-                                key=f"global_echeance_{tache_id_global}"
-                            )
-
-                        with gt2:
-                            statuts = ["À faire", "En cours", "Terminée"]
-                            priorites = ["Basse", "Moyenne", "Haute"]
-
-                            statut_g_mod = st.selectbox(
-                                "Statut",
-                                statuts,
-                                index=statuts.index(tache_global["statut"]) if tache_global["statut"] in statuts else 0,
-                                key=f"global_statut_{tache_id_global}"
-                            )
-                            priorite_g_mod = st.selectbox(
-                                "Priorité",
-                                priorites,
-                                index=priorites.index(tache_global["priorite"]) if tache_global["priorite"] in priorites else 1,
-                                key=f"global_priorite_{tache_id_global}"
-                            )
-                            notes_g_mod = st.text_area(
-                                "Notes",
-                                value=tache_global["notes"] if tache_global["notes"] else "",
-                                key=f"global_notes_{tache_id_global}"
-                            )
-
-                        submit_mod_tache_global = st.form_submit_button("Enregistrer les modifications de la tâche")
-
-                        if submit_mod_tache_global:
-                            if not titre_g_mod.strip():
-                                st.error("Le titre de la tâche est obligatoire.")
-                            else:
-                                modifier_tache(
-                                    tache_id_global,
-                                    org_options_edit[org_g_mod],
-                                    titre_g_mod.strip(),
-                                    responsable_g_mod.strip(),
-                                    str(echeance_g_mod),
-                                    statut_g_mod,
-                                    priorite_g_mod,
-                                    notes_g_mod.strip()
-                                )
-                                st.success("Tâche modifiée avec succès.")
-                                st.rerun()
-
-                    confirm_delete_tache_global = st.checkbox(
-                        "Je confirme la suppression de cette tâche.",
-                        key=f"delete_tache_global_{tache_id_global}"
-                    )
-                    if st.button("Supprimer cette tâche", key=f"btn_delete_tache_global_{tache_id_global}"):
-                        if confirm_delete_tache_global:
-                            supprimer_tache(tache_id_global)
-                            st.success("Tâche supprimée avec succès.")
-                            st.rerun()
-                        else:
-                            st.warning("Tu dois confirmer la suppression de la tâche.")
-
         with tab2:
-            col_todo, col_progress, col_done = st.columns(3)
-
-            with col_todo:
-                st.markdown("#### À faire")
-                todo_df = taches_filtrees[taches_filtrees["statut"] == "À faire"]
-                if todo_df.empty:
-                    st.info("Aucune tâche.")
-                else:
-                    for _, row in todo_df.iterrows():
-                        st.markdown(
-                            f"""
-**{row['titre']}**  
-Responsable : {row['responsable'] if row['responsable'] else '-'}  
-Échéance : {row['echeance'] if row['echeance'] else '-'}  
-Priorité : {row['priorite'] if row['priorite'] else '-'}  
-Organisme : {row['organisation']}
-"""
-                        )
-                        if st.button(f"Passer en cours #{row['id']}", key=f"todo_to_progress_{row['id']}"):
-                            modifier_tache(
-                                row["id"],
-                                get_tache_by_id(row["id"])["organisation_id"],
-                                get_tache_by_id(row["id"])["titre"],
-                                get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
-                                get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
-                                "En cours",
-                                get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
-                                get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
-                            )
-                            st.rerun()
-                        st.divider()
-
-            with col_progress:
-                st.markdown("#### En cours")
-                progress_df = taches_filtrees[taches_filtrees["statut"] == "En cours"]
-                if progress_df.empty:
-                    st.info("Aucune tâche.")
-                else:
-                    for _, row in progress_df.iterrows():
-                        st.markdown(
-                            f"""
-**{row['titre']}**  
-Responsable : {row['responsable'] if row['responsable'] else '-'}  
-Échéance : {row['echeance'] if row['echeance'] else '-'}  
-Priorité : {row['priorite'] if row['priorite'] else '-'}  
-Organisme : {row['organisation']}
-"""
-                        )
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button(f"Revenir à faire #{row['id']}", key=f"progress_to_todo_{row['id']}"):
-                                modifier_tache(
-                                    row["id"],
-                                    get_tache_by_id(row["id"])["organisation_id"],
-                                    get_tache_by_id(row["id"])["titre"],
-                                    get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
-                                    get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
-                                    "À faire",
-                                    get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
-                                    get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
-                                )
-                                st.rerun()
-                        with c2:
-                            if st.button(f"Terminer #{row['id']}", key=f"progress_to_done_{row['id']}"):
-                                modifier_tache(
-                                    row["id"],
-                                    get_tache_by_id(row["id"])["organisation_id"],
-                                    get_tache_by_id(row["id"])["titre"],
-                                    get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
-                                    get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
-                                    "Terminée",
-                                    get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
-                                    get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
-                                )
-                                st.rerun()
-                        st.divider()
-
-            with col_done:
-                st.markdown("#### Terminée")
-                done_df = taches_filtrees[taches_filtrees["statut"] == "Terminée"]
-                if done_df.empty:
-                    st.info("Aucune tâche.")
-                else:
-                    for _, row in done_df.iterrows():
-                        st.markdown(
-                            f"""
-**{row['titre']}**  
-Responsable : {row['responsable'] if row['responsable'] else '-'}  
-Échéance : {row['echeance'] if row['echeance'] else '-'}  
-Priorité : {row['priorite'] if row['priorite'] else '-'}  
-Organisme : {row['organisation']}
-"""
-                        )
-                        if st.button(f"Réouvrir #{row['id']}", key=f"done_to_progress_{row['id']}"):
-                            modifier_tache(
-                                row["id"],
-                                get_tache_by_id(row["id"])["organisation_id"],
-                                get_tache_by_id(row["id"])["titre"],
-                                get_tache_by_id(row["id"])["responsable"] if get_tache_by_id(row["id"])["responsable"] else "",
-                                get_tache_by_id(row["id"])["echeance"] if get_tache_by_id(row["id"])["echeance"] else "",
-                                "En cours",
-                                get_tache_by_id(row["id"])["priorite"] if get_tache_by_id(row["id"])["priorite"] else "Moyenne",
-                                get_tache_by_id(row["id"])["notes"] if get_tache_by_id(row["id"])["notes"] else ""
-                            )
-                            st.rerun()
-                        st.divider()
+            employes_liste = get_employes()
+            if employes_liste.empty:
+                st.info("Aucun employé enregistré.")
+            else:
+                for _, emp in employes_liste.iterrows():
+                    st.markdown(f"### {emp['nom']} — {emp['poste'] if emp['poste'] else 'Sans poste'}")
+                    emp_tasks = get_taches_by_employe(emp["id"])
+                    if emp_tasks.empty:
+                        st.info("Aucune tâche assignée.")
+                    else:
+                        st.dataframe(emp_tasks, use_container_width=True)
