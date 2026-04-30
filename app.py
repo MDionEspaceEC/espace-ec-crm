@@ -33,6 +33,11 @@ def init_db():
             notes TEXT
         )
     """)
+    cur.execute("PRAGMA table_info(organisations)")
+    colonnes_org = [row[1] for row in cur.fetchall()]
+    if "employe_id_attitre" not in colonnes_org:
+        cur.execute("ALTER TABLE organisations ADD COLUMN employe_id_attitre INTEGER")
+
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS employes (
@@ -106,25 +111,25 @@ def get_organisation_by_id(org_id):
     return None if df.empty else df.iloc[0]
 
 
-def ajouter_organisation(nom, type_org, ville, telephone, courriel, statut, notes):
+def ajouter_organisation(nom, type_org, ville, telephone, courriel, statut, notes, employe_id_attitre):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO organisations (nom, type_org, ville, telephone, courriel, statut, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (nom, type_org, ville, telephone, courriel, statut, notes))
+        INSERT INTO organisations (nom, type_org, ville, telephone, courriel, statut, notes, employe_id_attitre)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (nom, type_org, ville, telephone, courriel, statut, notes, employe_id_attitre))
     conn.commit()
     conn.close()
 
 
-def modifier_organisation(org_id, nom, type_org, ville, telephone, courriel, statut, notes):
+def modifier_organisation(org_id, nom, type_org, ville, telephone, courriel, statut, notes, employe_id_attitre):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         UPDATE organisations
-        SET nom = ?, type_org = ?, ville = ?, telephone = ?, courriel = ?, statut = ?, notes = ?
+        SET nom = ?, type_org = ?, ville = ?, telephone = ?, courriel = ?, statut = ?, notes = ?, employe_id_attitre = ?
         WHERE id = ?
-    """, (nom, type_org, ville, telephone, courriel, statut, notes, org_id))
+    """, (nom, type_org, ville, telephone, courriel, statut, notes, employe_id_attitre, org_id))
     conn.commit()
     conn.close()
 
@@ -404,6 +409,11 @@ if menu == "Tableau de bord":
 elif menu == "Organismes":
     st.subheader("Ajouter un organisme")
 
+    employes = get_employes()
+    options_employes = {"Aucun employé attitré": None}
+    for _, row in employes.iterrows():
+        options_employes[f"{row['nom']} (ID {row['id']})"] = row["id"]
+
     with st.form("form_organisation", clear_on_submit=True):
         col1, col2 = st.columns(2)
 
@@ -420,13 +430,26 @@ elif menu == "Organismes":
 
         submit_org = st.form_submit_button("Enregistrer l'organisme")
 
+            employe_attitre_label = st.selectbox(
+                "Employé attitré à l'organisme",
+                list(options_employes.keys())
+            )
+
         if submit_org:
             if not nom.strip():
                 st.error("Le nom de l'organisme est obligatoire.")
             else:
-                ajouter_organisation(nom.strip(), type_org, ville.strip(), telephone.strip(), courriel.strip(), statut, notes.strip())
-                st.success("Organisme ajouté avec succès.")
-                st.rerun()
+                                ajouter_organisation(
+                    nom.strip(),
+                    type_org,
+                    ville.strip(),
+                    telephone.strip(),
+                    courriel.strip(),
+                    statut,
+                    notes.strip(),
+                    options_employes[employe_attitre_label]
+                )
+
 
     st.subheader("Liste des organismes")
     orgs = get_organisations()
